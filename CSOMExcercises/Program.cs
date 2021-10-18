@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
@@ -30,9 +31,11 @@ namespace CSOMExcercises
                 await context.ExecuteQueryAsync();
                 Console.WriteLine($"Title: {context.Web.Title}");
 
-                /*await CreateList(context);
-                await CreateTerms(context);*/
-                await CreateSiteColumns(context);
+                //await CreateList(context);
+                //await CreateTerms(context);
+                //await CreateSiteColumns(context);
+                //await CreateAndAssignContentTypes(context);
+                await CreateListItems(context);
             }
         }
         public static async Task CreateList(ClientContext ctx)
@@ -112,6 +115,74 @@ namespace CSOMExcercises
             tmField.Update();
 
             await ctx.ExecuteQueryAsync();
+        }
+        /*public static async Task PrintContentTypes(ClientContext ctx)
+        {
+            ContentTypeCollection ctCollection = ctx.Web.ContentTypes;
+            ctx.Load(ctCollection);
+            await ctx.ExecuteQueryAsync();
+
+            foreach (var contentType in ctCollection)
+            {
+                Console.WriteLine($"Content Type Name: {contentType.Name}");
+            }
+        }*/
+        public static async Task CreateAndAssignContentTypes(ClientContext ctx)
+        {
+            Console.WriteLine("Create new Content Type");
+            ContentTypeCollection ctCollection = ctx.Web.ContentTypes;
+            ctx.Load(ctCollection);
+            await ctx.ExecuteQueryAsync();
+
+            var parentCt = ctCollection.FirstOrDefault(contentType => contentType.Name == "Item");
+            /* Use default Item content type */
+            Web rootWeb = ctx.Site.RootWeb;
+            var ctCsomTest = rootWeb.ContentTypes.Add(new ContentTypeCreationInformation { Name = "CSOM Test Content Type", ParentContentType = parentCt });
+            var titleField = ctCsomTest.Fields.GetByTitle("Title");
+            ctx.Load(titleField);
+            await ctx.ExecuteQueryAsync();
+            /* Set Title parent column as hidden and not required */
+            var titleRef = ctCsomTest.FieldLinks.GetById(titleField.Id);
+            titleRef.Hidden = true;
+            titleRef.Required = false;
+
+            /* Add existing site columns */
+            Field city = rootWeb.Fields.GetByInternalNameOrTitle("City");
+            Field about = rootWeb.Fields.GetByInternalNameOrTitle("About");
+            ctCsomTest.FieldLinks.Add(new FieldLinkCreationInformation { Field = city });
+            ctCsomTest.FieldLinks.Add(new FieldLinkCreationInformation { Field = about });
+            ctCsomTest.Update(true);
+            await ctx.ExecuteQueryAsync();
+
+            /* Assign to list as default type */
+            Console.WriteLine("Assigning new content type to list");
+            List targetList = ctx.Web.Lists.GetByTitle("CSOM Test");
+            if (targetList != null)
+            {
+                targetList.ContentTypes.AddExistingContentType(ctCsomTest);
+                targetList.Update();
+                var contentTypesCol = targetList.ContentTypes;
+                ctx.Load(contentTypesCol, col => col.Include(ct => ct.Name, ct => ct.Id));
+                await ctx.ExecuteQueryAsync();
+
+                var contentTypesOrder = new List<ContentTypeId>();
+                foreach (var ct in contentTypesCol)
+                {
+                    Console.WriteLine(ct.Name);
+                    if (ct.Name == "CSOM Test Content Type")
+                    {
+                        contentTypesOrder.Add(ct.Id);
+                    }
+                }
+                targetList.RootFolder.UniqueContentTypeOrder = contentTypesOrder;
+                targetList.RootFolder.Update();
+                targetList.Update();
+                await ctx.ExecuteQueryAsync();
+            }
+        }
+        public static async Task CreateListItems(ClientContext ctx)
+        {
+
         }
     }
 }
