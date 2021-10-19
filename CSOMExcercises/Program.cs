@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.SharePoint.Client;
@@ -36,7 +35,11 @@ namespace CSOMExcercises
                 //await CreateSiteColumns(context);
                 //await CreateAndAssignContentTypes(context);
                 //await CreateListItems(context);
-                await UpdateDefaultValuesAndAddItems(context);
+                //await UpdateDefaultValuesAndAddItems(context);
+                //await QueryData(context);
+                //await CreateListView(context);
+                //await BatchUpdate(context);
+                await AddNewFieldAndMigrate(context);
             }
         }
         public static async Task CreateList(ClientContext ctx)
@@ -342,6 +345,137 @@ namespace CSOMExcercises
                 oListItem["About"] = item;
 
                 oListItem.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task QueryData(ClientContext ctx)
+        {
+            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var camlQuery = new CamlQuery();
+            camlQuery.ViewXml = @"
+<View>
+<Query>
+    <Where>
+        <Neq>
+            <FieldRef Name='About' />
+            <Value Type='Text'>about default</Value>
+        </Neq>
+    </Where>
+</Query>
+</View>
+";
+            ListItemCollection collListItem = list.GetItems(camlQuery);
+
+            ctx.Load(collListItem);
+            await ctx.ExecuteQueryAsync();
+
+            foreach (var item in collListItem)
+            {
+                var city = item["City"] as TaxonomyFieldValue;
+                Console.WriteLine($"ID: {item.Id}\nAbout: {item["About"]}\nCity: {city.Label}\n-----\n");
+            }
+        }
+        public static async Task CreateListView(ClientContext ctx)
+        {
+            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+
+            ViewCollection viewCollection = list.Views;
+            ctx.Load(viewCollection);
+            await ctx.ExecuteQueryAsync();
+
+            // To query against metadata
+            // https://www.sharepointpals.com/post/retrieving-list-item-using-caml-query-against-taxonomy-field-in-sharepoint-2013/
+            ViewCreationInformation viewCreationInformation = new ViewCreationInformation()
+            {
+                Title = "Test View",
+                ViewTypeKind = ViewType.Html,
+                Query = @"
+<Where>
+    <Contains>
+        <FieldRef Name='City' />
+        <Value Type='Text'>Ho Chi Minh</Value>
+    </Contains>
+</Where>
+<OrderBy>
+    <FieldRef Name='Created' Ascending='FALSE' />
+</OrderBy>
+",
+                ViewFields = new string[] { "ID", "Title", "City", "About" }
+            };
+            var listView = viewCollection.Add(viewCreationInformation);
+            await ctx.ExecuteQueryAsync();
+            listView.Title = "Test View";
+        }
+        public static async Task BatchUpdate(ClientContext ctx, int batchNum = 2)
+        {
+            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var camlQuery = new CamlQuery();
+            camlQuery.ViewXml = @"
+<View>
+<Query>
+    <Where>
+        <Eq>
+            <FieldRef Name='About' />
+            <Value Type='Text'>about default</Value>
+        </Eq>
+    </Where>
+</Query>
+<RowLimit>" + batchNum + @"</RowLimit>
+</View>
+";
+            ListItemCollection collListItem = list.GetItems(camlQuery);
+
+            ctx.Load(collListItem);
+            await ctx.ExecuteQueryAsync();
+
+            foreach (var item in collListItem)
+            {
+                item["About"] = "Update script";
+
+                item.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task AddNewFieldAndMigrate(ClientContext ctx)
+        {
+            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var authorField = list.Fields.AddFieldAsXml(@"
+<Field 
+    DisplayName='Author'
+    Name='Author'
+    Type='User'
+    UserSelectionMode='0'
+/>
+", true, AddFieldOptions.AddFieldInternalNameHint);
+            await ctx.ExecuteQueryAsync();
+
+            // Migrate all items with administrator user in author field
+            var caml = CamlQuery.CreateAllItemsQuery();
+            var itemColl = list.GetItems(caml);
+            ctx.Load(itemColl);
+            // Load user refs
+            // https://social.msdn.microsoft.com/Forums/office/en-US/900b5143-f5b3-4fd5-a9ce-3e7d7c3ecfc1/csomjsom-operation-to-update-user-field-value?forum=sharepointdevelopment
+            // https://stackoverflow.com/questions/31177333/ensureuser-using-email-address-in-sharepoint-client-object-model
+            var result = Microsoft.SharePoint.Client.Utilities.Utility.ResolvePrincipal(
+                ctx, ctx.Web, "nghiep@mianohr.onmicrosoft.com",
+                Microsoft.SharePoint.Client.Utilities.PrincipalType.User,
+                Microsoft.SharePoint.Client.Utilities.PrincipalSource.All,
+                null, true
+            );
+            await ctx.ExecuteQueryAsync();
+            if (result == null)
+            {
+                throw new Exception("User admin not found");
+            }
+            var user = ctx.Web.EnsureUser(result.Value.LoginName);
+            ctx.Load(user);
+            await ctx.ExecuteQueryAsync();
+            var fieldUserValue = new FieldUserValue() { LookupId = user.Id };
+
+            foreach (var item in itemColl)
+            {
+                item["Author"] = fieldUserValue;
+                item.Update();
             }
             await ctx.ExecuteQueryAsync();
         }
