@@ -35,7 +35,8 @@ namespace CSOMExcercises
                 //await CreateTerms(context);
                 //await CreateSiteColumns(context);
                 //await CreateAndAssignContentTypes(context);
-                await CreateListItems(context);
+                //await CreateListItems(context);
+                await UpdateDefaultValuesAndAddItems(context);
             }
         }
         public static async Task CreateList(ClientContext ctx)
@@ -182,7 +183,167 @@ namespace CSOMExcercises
         }
         public static async Task CreateListItems(ClientContext ctx)
         {
+            Console.WriteLine("Adding 5 new items to list");
+            var data = new[]
+            {
+                ("Test about", "Stockholm"),
+                ("Test about me and others", "Stockholm"),
+                ("Another test about", "Ho Chi Minh"),
+                ("Another test about which is longer than the rest", "Ho Chi Minh"),
+                ("Another test about which is the longest about section", "Ho Chi Minh")
+            };
 
+            // Get terms
+            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
+            if (taxonomySession == null)
+            {
+                throw new Exception("Cannot get taxonomy session");
+            }
+
+            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
+            ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
+            await ctx.ExecuteQueryAsync();
+
+            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
+            ctx.Load(termGroup);
+            await ctx.ExecuteQueryAsync();
+            if (termGroup == null)
+            {
+                throw new Exception("Missing group");
+            }
+
+            var termSetColl = termGroup.TermSets;
+            var results = ctx.LoadQuery(termSetColl.Where(t => t.Name == "city-Nghiep"));
+            await ctx.ExecuteQueryAsync();
+
+            var termSet = results.FirstOrDefault();
+            if (termSet == null)
+            {
+                throw new Exception("Missing term set");
+            }
+            var terms = termSet.Terms;
+            ctx.Load(terms);
+            await ctx.ExecuteQueryAsync();
+
+            // Add items from data to list
+            List list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var field = list.Fields.GetByInternalNameOrTitle("City");
+            var taxonomyField = ctx.CastTo<TaxonomyField>(field);
+            foreach (var item in data)
+            {
+                ListItemCreationInformation itemCreateInfo = new ListItemCreationInformation();
+                ListItem oListItem = list.AddItem(itemCreateInfo);
+                oListItem["About"] = item.Item1;
+
+                // Find term by label
+                var term = terms.FirstOrDefault(t => t.Name == item.Item2);
+                if (term == null)
+                {
+                    Console.WriteLine("Term not found. Skipping");
+                    continue;
+                }
+                taxonomyField.SetFieldValueByTerm(oListItem, term, 1033);
+
+                oListItem.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task UpdateDefaultValuesAndAddItems(ClientContext ctx)
+        {
+            // Load terms, list
+            const string DefaultTermLabel = "Ho Chi Minh";
+            string[] aboutDefaultData = new string[]
+            {
+                "Ho Chi Minh",
+                "Stockholm"
+            };
+            string[] cityDefaultData = new string[]
+            {
+                "Testing default city",
+                ""
+            };
+            Web rootWeb = ctx.Site.RootWeb;
+            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
+            if (taxonomySession == null)
+            {
+                throw new Exception("Cannot get taxonomy session");
+            }
+
+            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
+            ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
+            await ctx.ExecuteQueryAsync();
+
+            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
+            ctx.Load(termGroup);
+            await ctx.ExecuteQueryAsync();
+            if (termGroup == null)
+            {
+                throw new Exception("Missing group");
+            }
+
+            var termSetColl = termGroup.TermSets;
+            var results = ctx.LoadQuery(termSetColl.Where(t => t.Name == "city-Nghiep"));
+            await ctx.ExecuteQueryAsync();
+
+            var termSet = results.FirstOrDefault();
+            if (termSet == null)
+            {
+                throw new Exception("Missing term set");
+            }
+            var terms = termSet.Terms;
+            ctx.Load(terms);
+            await ctx.ExecuteQueryAsync();
+
+            var txField = rootWeb.Fields.GetByInternalNameOrTitle("City");
+            var aboutField = rootWeb.Fields.GetByInternalNameOrTitle("About");
+            var taxonomyField = ctx.CastTo<TaxonomyField>(txField);
+            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+
+            // Update default value of "About" field and add 2 new items
+            aboutField.DefaultValue = "about default";
+            aboutField.UpdateAndPushChanges(true);
+            await ctx.ExecuteQueryAsync();
+            foreach (var item in aboutDefaultData)
+            {
+                var createItemInfo = new ListItemCreationInformation();
+                var oListItem = list.AddItem(createItemInfo);
+
+                var term = terms.FirstOrDefault(t => t.Name == item);
+                if (term == null)
+                {
+                    Console.WriteLine("Term name not found. Skipping");
+                    continue;
+                }
+
+                taxonomyField.SetFieldValueByTerm(oListItem, term, 1033);
+                oListItem.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+
+            // Update default value of "City" and add 2 new items
+            var defaultTerm = terms.FirstOrDefault(t => t.Name == DefaultTermLabel);
+            if (defaultTerm == null)
+            {
+                throw new Exception("Default term not found");
+            }
+            // https://www.timmerman.it/index.php/setting-the-default-value-of-a-managed-metadata-column-from-csom/
+            var defaultTxFieldValue = new TaxonomyFieldValue() { Label = defaultTerm.Name, TermGuid = defaultTerm.Id.ToString().ToLower(), WssId = -1 };
+            var validatedValue = taxonomyField.GetValidatedString(defaultTxFieldValue);
+            await ctx.ExecuteQueryAsync();
+
+            taxonomyField.DefaultValue = validatedValue.Value;
+            taxonomyField.UserCreated = false;
+            taxonomyField.UpdateAndPushChanges(true);
+            await ctx.ExecuteQueryAsync();
+            foreach (var item in cityDefaultData)
+            {
+                var createItemInfo = new ListItemCreationInformation();
+                var oListItem = list.AddItem(createItemInfo);
+                oListItem["About"] = item;
+
+                oListItem.Update();
+            }
+            await ctx.ExecuteQueryAsync();
         }
     }
 }
