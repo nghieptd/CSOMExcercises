@@ -21,7 +21,7 @@ namespace CSOMExcercises
             var configurations = GetConfiguration();
             var sharepointConfigs = configurations.GetSection("SharePoint").Get<SharePointConfiguration>();
             /*Console.WriteLine(sharepointConfigs.SiteUri);*/
-            
+
             // Note: The PnP Sites Core AuthenticationManager class also supports this
             using (var authenticationManager = new AuthenticationManager())
             using (var context = authenticationManager.GetContext(sharepointConfigs))
@@ -39,7 +39,10 @@ namespace CSOMExcercises
                 //await QueryData(context);
                 //await CreateListView(context);
                 //await BatchUpdate(context);
-                await AddNewFieldAndMigrate(context);
+                //await AddNewFieldAndMigrate(context);
+                //await AddCitiesField(context);
+                //await UpdateContentTypes(context);
+                //await AddCitiesItems(context);
             }
         }
         public static async Task CreateList(ClientContext ctx)
@@ -92,7 +95,7 @@ namespace CSOMExcercises
                     <Field
                         DisplayName='City'
                         Name='City'
-                        Type='TaxonomyFieldTypeMulti'
+                        Type='TaxonomyFieldType'
                     />
                 ", false, AddFieldOptions.AddFieldInternalNameHint);
 
@@ -478,6 +481,163 @@ namespace CSOMExcercises
                 // NOTE: The name "Author" already taken as internal field name
                 item["TestAuthor"] = fieldUserValue;
                 item.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task AddCitiesField(ClientContext ctx)
+        {
+            Console.WriteLine("Creating cities site column");
+
+            Web rootWeb = ctx.Site.RootWeb;
+            Field citiesField = rootWeb.Fields.AddFieldAsXml(@$"
+                    <Field
+                        DisplayName='{Constants.Columns.Cities.DisplayName}'
+                        Name='{Constants.Columns.Cities.Name}'
+                        Type='TaxonomyFieldTypeMulti'
+                        Mult='TRUE'
+                    />
+                ", false, AddFieldOptions.AddFieldInternalNameHint);
+            await ctx.ExecuteQueryAsync();
+
+            /* Find information about term sets and update to taxonomy field */
+            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
+            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
+            TermSetCollection termSets = termStore.GetTermSetsByName("city-Nghiep", 1033);
+
+            ctx.Load(termSets, tsc => tsc.Include(ts => ts.Id));
+            ctx.Load(termStore, ts => ts.Id);
+            await ctx.ExecuteQueryAsync();
+
+            var termStoreId = termStore.Id;
+            var termSetId = termSets.FirstOrDefault().Id;
+
+            /* Update taxonomy field */
+            TaxonomyField tmField = ctx.CastTo<TaxonomyField>(citiesField);
+            tmField.SspId = termStoreId;
+            tmField.TermSetId = termSetId;
+            tmField.TargetTemplate = String.Empty;
+            tmField.AnchorId = Guid.Empty;
+            tmField.Update();
+
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task UpdateContentTypes(ClientContext ctx)
+        {
+            Console.WriteLine("Updating content type with new field");
+
+            var rootWeb = ctx.Site.RootWeb;
+            ContentTypeCollection ctColl = rootWeb.ContentTypes;
+            ctx.Load(ctColl);
+            await ctx.ExecuteQueryAsync();
+
+            var csomTestCt = ctColl.FirstOrDefault(ct => ct.Name == Constants.ContentType.Name);
+            var citiesField = rootWeb.Fields.GetByInternalNameOrTitle(Constants.Columns.Cities.Name);
+            csomTestCt.FieldLinks.Add(new FieldLinkCreationInformation { Field = citiesField });
+
+            csomTestCt.Update(true);
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task AddCitiesItems(ClientContext ctx)
+        {
+            Console.WriteLine("Adding new items with cities");
+            var data = new[]
+            {
+                (
+                    "Test about with cities",
+                    Constants.Taxonomy.TermsIndex.HoChiMinh,
+                    new[]
+                    {
+                        Constants.Taxonomy.TermsIndex.HoChiMinh,
+                        Constants.Taxonomy.TermsIndex.Stockholm
+                    }
+                ),
+                (
+                    "Test about with cities, part two",
+                    Constants.Taxonomy.TermsIndex.HoChiMinh,
+                    new[]
+                    {
+                        Constants.Taxonomy.TermsIndex.Stockholm
+                    }
+                ),
+                (
+                    "Test about with cities, final part",
+                    Constants.Taxonomy.TermsIndex.Stockholm,
+                    new[]
+                    {
+                        Constants.Taxonomy.TermsIndex.Stockholm,
+                        Constants.Taxonomy.TermsIndex.HoChiMinh
+                    }
+                )
+            };
+            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
+            if (taxonomySession == null)
+            {
+                throw new Exception("Cannot get taxonomy session");
+            }
+
+            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
+            ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
+            await ctx.ExecuteQueryAsync();
+
+            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
+            ctx.Load(termGroup);
+            await ctx.ExecuteQueryAsync();
+            if (termGroup == null)
+            {
+                throw new Exception("Missing group");
+            }
+
+            var termSetColl = termGroup.TermSets;
+            var results = ctx.LoadQuery(termSetColl.Where(t => t.Name == "city-Nghiep"));
+            await ctx.ExecuteQueryAsync();
+
+            var termSet = results.FirstOrDefault();
+            if (termSet == null)
+            {
+                throw new Exception("Missing term set");
+            }
+            var terms = termSet.Terms;
+            ctx.Load(terms);
+            await ctx.ExecuteQueryAsync();
+
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
+            var tmpField = list.Fields.GetByInternalNameOrTitle(Constants.Columns.City.Name);
+            var cityField = ctx.CastTo<TaxonomyField>(tmpField);
+            tmpField = list.Fields.GetByInternalNameOrTitle(Constants.Columns.Cities.Name);
+            var citiesField = ctx.CastTo<TaxonomyField>(tmpField);
+            foreach (var item in data)
+            {
+                ListItemCreationInformation itemCreationInformation = new ListItemCreationInformation();
+                var spItem = list.AddItem(itemCreationInformation);
+
+                spItem["About"] = item.Item1;
+
+                var cityTerm = terms.FirstOrDefault(t => t.Name == Constants.Taxonomy.GetTermName(item.Item2));
+                if (cityTerm != null)
+                {
+                    cityField.SetFieldValueByTerm(spItem, cityTerm, 1033);
+                }
+                else
+                {
+                    Console.WriteLine("Missing city term. Skipping column");
+                }
+
+                var fieldColl = new TaxonomyFieldValueCollection(ctx, null, citiesField);
+                foreach (var termName in item.Item3)
+                {
+                    var term = terms.FirstOrDefault(t => t.Name == Constants.Taxonomy.GetTermName(termName));
+                    if (term != null)
+                    {
+                        fieldColl.PopulateFromLabelGuidPairs($"{term.Name}|{term.Id.ToString().ToLower()}");
+                    }
+                    else
+                    {
+                        Console.WriteLine("Missing city term. Skipping value");
+                    }
+                }
+                citiesField.SetFieldValueByValueCollection(spItem, fieldColl);
+
+                spItem.Update();
             }
             await ctx.ExecuteQueryAsync();
         }
