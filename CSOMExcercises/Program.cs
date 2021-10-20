@@ -442,11 +442,12 @@ namespace CSOMExcercises
             var authorField = list.Fields.AddFieldAsXml(@"
 <Field 
     DisplayName='Author'
-    Name='Author'
+    Name='TestAuthor'
     Type='User'
-    UserSelectionMode='0'
+    UserSelectionMode='PeopleOnly'
 />
 ", true, AddFieldOptions.AddFieldInternalNameHint);
+            list.Update();
             await ctx.ExecuteQueryAsync();
 
             // Migrate all items with administrator user in author field
@@ -470,11 +471,12 @@ namespace CSOMExcercises
             var user = ctx.Web.EnsureUser(result.Value.LoginName);
             ctx.Load(user);
             await ctx.ExecuteQueryAsync();
-            var fieldUserValue = new FieldUserValue() { LookupId = user.Id };
 
+            var fieldUserValue = new FieldUserValue() { LookupId = user.Id };
             foreach (var item in itemColl)
             {
-                item["Author"] = fieldUserValue;
+                // NOTE: The name "Author" already taken as internal field name
+                item["TestAuthor"] = fieldUserValue;
                 item.Update();
             }
             await ctx.ExecuteQueryAsync();
