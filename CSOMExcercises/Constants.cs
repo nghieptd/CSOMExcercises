@@ -60,4 +60,8 @@ namespace CSOMExcercises.Constants
     {
         public const string Name = "CSOM Test";
     }
+    static class Document
+    {
+        public const string Name = "Document Test";
+    }
 }

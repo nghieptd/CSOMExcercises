@@ -1,7 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.SharePoint.Client;
 using Microsoft.SharePoint.Client.Taxonomy;
@@ -43,6 +48,10 @@ namespace CSOMExcercises
                 //await AddCitiesField(context);
                 //await UpdateContentTypes(context);
                 //await AddCitiesItems(context);
+                //await AddDocumentLibrary(context);
+                //await CreateDocumentHierachy(context);
+                //await QueryDocument(context);
+                await UploadFile(context);
             }
         }
         public static async Task CreateList(ClientContext ctx)
@@ -238,7 +247,7 @@ namespace CSOMExcercises
             foreach (var item in data)
             {
                 ListItemCreationInformation itemCreateInfo = new ListItemCreationInformation();
-                ListItem oListItem = list.AddItem(itemCreateInfo);
+                var oListItem = list.AddItem(itemCreateInfo);
                 oListItem["About"] = item.Item1;
 
                 // Find term by label
@@ -640,6 +649,153 @@ namespace CSOMExcercises
                 spItem.Update();
             }
             await ctx.ExecuteQueryAsync();
+        }
+        public static async Task AddDocumentLibrary(ClientContext ctx)
+        {
+            ListCreationInformation creationInformation = new ListCreationInformation()
+            {
+                Title = Constants.Document.Name,
+                TemplateType = (int) ListTemplateType.DocumentLibrary
+            };
+
+            var newLib = ctx.Web.Lists.Add(creationInformation);
+            ctx.Load(newLib);
+            var ctColl = ctx.Site.RootWeb.ContentTypes;
+            ctx.Load(ctColl);
+            await ctx.ExecuteQueryAsync();
+
+            var ctCsomTest = ctColl.FirstOrDefault(ct => ct.Name == Constants.ContentType.Name);
+            if (ctCsomTest == null)
+            {
+                throw new Exception("Missing content type");
+            }
+
+            newLib.ContentTypes.AddExistingContentType(ctCsomTest);
+            newLib.Update();
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task CreateDocumentHierachy(ClientContext ctx)
+        {
+            var list = ctx.Web.Lists.GetByTitle(Constants.Document.Name);
+            var rootFolder = list.RootFolder;
+
+            // Add Folder 1
+            var folder1 = rootFolder.Folders.Add("Folder 1");
+            ctx.Load(folder1);
+            await ctx.ExecuteQueryAsync();
+
+            // Add Folder 2
+            var folder2 = folder1.Folders.Add("Folder 2");
+            ctx.Load(folder2);
+            await ctx.ExecuteQueryAsync();
+            // and 3 files
+            for (int i = 0; i < 3; i++)
+            {
+                var sampleFileInfo = new FileCreationInformation()
+                {
+                    Url = $"file_1{i+1}.txt",
+                    Content = Encoding.ASCII.GetBytes("Hello, World!")
+                };
+                var addedFile = folder2.Files.Add(sampleFileInfo);
+                ctx.Load(addedFile);
+                await ctx.ExecuteQueryAsync();
+
+                var itemFile = addedFile.ListItemAllFields;
+                itemFile["Title"] = $"Test file generation {i + 1}";
+                itemFile["About"] = "Folder test";
+                itemFile.Update();
+            }
+            await ctx.ExecuteQueryAsync();
+
+            // ...and 2 more files, getting more elaborate
+            var field = list.Fields.GetByInternalNameOrTitle(Constants.Columns.Cities.Name);
+            var citiesField = ctx.CastTo<TaxonomyField>(field);
+            var stockholmTerm = await Helpers.GetTermByEnum(ctx, Constants.Taxonomy.TermsIndex.Stockholm);
+            var sampleFile2Info = new FileCreationInformation()
+            {
+                Url = "file_2.txt",
+                Content = Encoding.ASCII.GetBytes("Hello there.")
+            };
+            var sampleFile3Info = new FileCreationInformation()
+            {
+                Url = "file_3.txt",
+                Content = Encoding.ASCII.GetBytes("General Kenobi!")
+            };
+
+            var addedFile2 = folder2.Files.Add(sampleFile2Info);
+            var addedFile3 = folder2.Files.Add(sampleFile3Info);
+            ctx.Load(addedFile2);
+            ctx.Load(addedFile3);
+            await ctx.ExecuteQueryAsync();
+
+            var itemFile2 = addedFile2.ListItemAllFields;
+            var fieldColl = new TaxonomyFieldValueCollection(ctx, null, citiesField);
+            fieldColl.PopulateFromLabelGuidPairs($"{stockholmTerm.Name}|{stockholmTerm.Id.ToString().ToLower()}");
+            citiesField.SetFieldValueByValueCollection(itemFile2, fieldColl);
+            itemFile2.Update();
+            var itemFile3 = addedFile3.ListItemAllFields;
+            fieldColl = new TaxonomyFieldValueCollection(ctx, null, citiesField);
+            fieldColl.PopulateFromLabelGuidPairs($"{stockholmTerm.Name}|{stockholmTerm.Id.ToString().ToLower()}");
+            citiesField.SetFieldValueByValueCollection(itemFile3, fieldColl);
+            itemFile3.Update();
+            await ctx.ExecuteQueryAsync();
+        }
+        public static async Task QueryDocument(ClientContext ctx)
+        {
+            var list = ctx.Web.Lists.GetByTitle(Constants.Document.Name);
+            var rootFolder = list.RootFolder;
+            ctx.Load(rootFolder);
+            await ctx.ExecuteQueryAsync();
+
+            var camlQuery = new CamlQuery();
+            camlQuery.FolderServerRelativeUrl = $"{rootFolder.ServerRelativeUrl}/Folder 1/Folder 2";
+            camlQuery.ViewXml = $@"
+<View>
+<Query>
+    <Where>
+        <Contains>
+        <FieldRef Name='Cities' />
+        <Value Type='Text'>Stockholm</Value>
+    </Contains>
+    </Where>
+</Query>
+</View>
+";
+            var collListItems = list.GetItems(camlQuery);
+            ctx.Load(collListItems);
+            await ctx.ExecuteQueryAsync();
+
+            foreach (var item in collListItems)
+            {
+                Console.WriteLine($"ID: {item["ID"]} - Name: {item["FileLeafRef"]}");
+            }
+        }
+        public static async Task UploadFile(ClientContext ctx)
+        {
+            // https://sharepoint.stackexchange.com/questions/121904/create-a-document-in-sharepoint-online-using-csom
+            using (var stream = new MemoryStream())
+            {
+                using (var document = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, true))
+                {
+                    document.AddMainDocumentPart();
+                    document.MainDocumentPart.Document = new Document(new Body(new Paragraph(new Run(new Text("Some content goes here")))));
+                }
+
+                var list = ctx.Web.Lists.GetByTitle(Constants.Document.Name);
+                var rootFolder = list.RootFolder;
+
+                // NOTE: Need to reset the stream before sending to SP
+                stream.Seek(0, SeekOrigin.Begin);
+                var fci = new FileCreationInformation()
+                {
+                    Url = "Document.docx",
+                    Overwrite = true,
+                    ContentStream = stream,
+                };
+                list.RootFolder.Files.Add(fci);
+
+                await ctx.ExecuteQueryAsync();
+            }
         }
     }
 }
