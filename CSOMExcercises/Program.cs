@@ -59,7 +59,7 @@ namespace CSOMExcercises
             Console.WriteLine("Creating List");
             Web web = ctx.Web;
             ListCreationInformation creationInfo = new ListCreationInformation();
-            creationInfo.Title = "CSOM Test";
+            creationInfo.Title = Constants.List.Name;
             creationInfo.TemplateType = (int)ListTemplateType.GenericList;
 
             List list = web.Lists.Add(creationInfo);
@@ -79,10 +79,10 @@ namespace CSOMExcercises
                 if (termStore != null)
                 {
                     /*1033 is the LCID (Locale Identifier) for North America */
-                    TermGroup newGroup = termStore.CreateGroup("CSOM Test", Guid.NewGuid());
-                    TermSet cityNghiep = newGroup.CreateTermSet("city-Nghiep", Guid.NewGuid(), 1033);
-                    cityNghiep.CreateTerm("Ho Chi Minh", 1033, Guid.NewGuid());
-                    cityNghiep.CreateTerm("Stockholm", 1033, Guid.NewGuid());
+                    TermGroup newGroup = termStore.CreateGroup(Constants.Taxonomy.TermGroupName, Guid.NewGuid());
+                    TermSet cityNghiep = newGroup.CreateTermSet(Constants.Taxonomy.TermSetName, Guid.NewGuid(), 1033);
+                    cityNghiep.CreateTerm(Constants.Taxonomy.GetTermName(Constants.Taxonomy.TermsIndex.HoChiMinh), 1033, Guid.NewGuid());
+                    cityNghiep.CreateTerm(Constants.Taxonomy.GetTermName(Constants.Taxonomy.TermsIndex.Stockholm), 1033, Guid.NewGuid());
 
                     await ctx.ExecuteQueryAsync();
                 }
@@ -93,17 +93,17 @@ namespace CSOMExcercises
             Console.WriteLine("Creating 'About' and 'City' site columns");
 
             Web rootWeb = ctx.Site.RootWeb;
-            rootWeb.Fields.AddFieldAsXml(@"
+            rootWeb.Fields.AddFieldAsXml(@$"
                     <Field 
-                        DisplayName='About'
-                        Name='About'
+                        DisplayName='{Constants.Columns.About.DisplayName}'
+                        Name='{Constants.Columns.About.Name}'
                         Type='Text'
                     />
                 ", false, AddFieldOptions.AddFieldInternalNameHint);
-            Field xmlTmField = rootWeb.Fields.AddFieldAsXml(@"
+            Field xmlTmField = rootWeb.Fields.AddFieldAsXml(@$"
                     <Field
-                        DisplayName='City'
-                        Name='City'
+                        DisplayName='{Constants.Columns.City.DisplayName}'
+                        Name='{Constants.Columns.City.DisplayName}'
                         Type='TaxonomyFieldType'
                     />
                 ", false, AddFieldOptions.AddFieldInternalNameHint);
@@ -113,7 +113,7 @@ namespace CSOMExcercises
             /* Find information about term sets and update to taxonomy field */
             TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
             TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
-            TermSetCollection termSets = termStore.GetTermSetsByName("city-Nghiep", 1033);
+            TermSetCollection termSets = termStore.GetTermSetsByName(Constants.Taxonomy.TermSetName, 1033);
 
             ctx.Load(termSets, tsc => tsc.Include(ts => ts.Id));
             ctx.Load(termStore, ts => ts.Id);
@@ -150,10 +150,14 @@ namespace CSOMExcercises
             ctx.Load(ctCollection);
             await ctx.ExecuteQueryAsync();
 
-            var parentCt = ctCollection.FirstOrDefault(contentType => contentType.Name == "Item");
+            var parentCt = ctCollection.FirstOrDefault(contentType => contentType.Name == Constants.ContentType.ParentContentTypeName);
             /* Use default Item content type */
             Web rootWeb = ctx.Site.RootWeb;
-            var ctCsomTest = rootWeb.ContentTypes.Add(new ContentTypeCreationInformation { Name = "CSOM Test Content Type", ParentContentType = parentCt });
+            var ctCsomTest = rootWeb.ContentTypes.Add(new ContentTypeCreationInformation
+            {
+                Name = Constants.ContentType.Name,
+                ParentContentType = parentCt
+            });
             var titleField = ctCsomTest.Fields.GetByTitle("Title");
             ctx.Load(titleField);
             await ctx.ExecuteQueryAsync();
@@ -163,8 +167,8 @@ namespace CSOMExcercises
             titleRef.Required = false;
 
             /* Add existing site columns */
-            Field city = rootWeb.Fields.GetByInternalNameOrTitle("City");
-            Field about = rootWeb.Fields.GetByInternalNameOrTitle("About");
+            Field city = rootWeb.Fields.GetByInternalNameOrTitle(Constants.Columns.City.Name);
+            Field about = rootWeb.Fields.GetByInternalNameOrTitle(Constants.Columns.About.Name);
             ctCsomTest.FieldLinks.Add(new FieldLinkCreationInformation { Field = city });
             ctCsomTest.FieldLinks.Add(new FieldLinkCreationInformation { Field = about });
             ctCsomTest.Update(true);
@@ -172,7 +176,7 @@ namespace CSOMExcercises
 
             /* Assign to list as default type */
             Console.WriteLine("Assigning new content type to list");
-            List targetList = ctx.Web.Lists.GetByTitle("CSOM Test");
+            List targetList = ctx.Web.Lists.GetByTitle(Constants.List.Name);
             if (targetList != null)
             {
                 targetList.ContentTypes.AddExistingContentType(ctCsomTest);
@@ -185,7 +189,7 @@ namespace CSOMExcercises
                 foreach (var ct in contentTypesCol)
                 {
                     Console.WriteLine(ct.Name);
-                    if (ct.Name == "CSOM Test Content Type")
+                    if (ct.Name == Constants.ContentType.Name)
                     {
                         contentTypesOrder.Add(ct.Id);
                     }
@@ -209,46 +213,17 @@ namespace CSOMExcercises
             };
 
             // Get terms
-            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
-            if (taxonomySession == null)
-            {
-                throw new Exception("Cannot get taxonomy session");
-            }
-
-            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
-            ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
-            await ctx.ExecuteQueryAsync();
-
-            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
-            ctx.Load(termGroup);
-            await ctx.ExecuteQueryAsync();
-            if (termGroup == null)
-            {
-                throw new Exception("Missing group");
-            }
-
-            var termSetColl = termGroup.TermSets;
-            var results = ctx.LoadQuery(termSetColl.Where(t => t.Name == "city-Nghiep"));
-            await ctx.ExecuteQueryAsync();
-
-            var termSet = results.FirstOrDefault();
-            if (termSet == null)
-            {
-                throw new Exception("Missing term set");
-            }
-            var terms = termSet.Terms;
-            ctx.Load(terms);
-            await ctx.ExecuteQueryAsync();
+            var terms = await Helpers.GetAllTerms(ctx);
 
             // Add items from data to list
-            List list = ctx.Web.Lists.GetByTitle("CSOM Test");
-            var field = list.Fields.GetByInternalNameOrTitle("City");
+            List list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
+            var field = list.Fields.GetByInternalNameOrTitle(Constants.Columns.City.Name);
             var taxonomyField = ctx.CastTo<TaxonomyField>(field);
             foreach (var item in data)
             {
                 ListItemCreationInformation itemCreateInfo = new ListItemCreationInformation();
                 var oListItem = list.AddItem(itemCreateInfo);
-                oListItem["About"] = item.Item1;
+                oListItem[Constants.Columns.About.Name] = item.Item1;
 
                 // Find term by label
                 var term = terms.FirstOrDefault(t => t.Name == item.Item2);
@@ -288,7 +263,7 @@ namespace CSOMExcercises
             ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
             await ctx.ExecuteQueryAsync();
 
-            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
+            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == Constants.List.Name);
             ctx.Load(termGroup);
             await ctx.ExecuteQueryAsync();
             if (termGroup == null)
@@ -312,7 +287,7 @@ namespace CSOMExcercises
             var txField = rootWeb.Fields.GetByInternalNameOrTitle("City");
             var aboutField = rootWeb.Fields.GetByInternalNameOrTitle("About");
             var taxonomyField = ctx.CastTo<TaxonomyField>(txField);
-            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
 
             // Update default value of "About" field and add 2 new items
             aboutField.DefaultValue = "about default";
@@ -362,14 +337,14 @@ namespace CSOMExcercises
         }
         public static async Task QueryData(ClientContext ctx)
         {
-            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
             var camlQuery = new CamlQuery();
-            camlQuery.ViewXml = @"
+            camlQuery.ViewXml = @$"
 <View>
 <Query>
     <Where>
         <Neq>
-            <FieldRef Name='About' />
+            <FieldRef Name='{Constants.Columns.About.Name}' />
             <Value Type='Text'>about default</Value>
         </Neq>
     </Where>
@@ -383,13 +358,14 @@ namespace CSOMExcercises
 
             foreach (var item in collListItem)
             {
-                var city = item["City"] as TaxonomyFieldValue;
-                Console.WriteLine($"ID: {item.Id}\nAbout: {item["About"]}\nCity: {city.Label}\n-----\n");
+                var about = item[Constants.Columns.About.Name];
+                var city = item[Constants.Columns.City.Name] as TaxonomyFieldValue;
+                Console.WriteLine($"ID: {item.Id}\nAbout: {about}\nCity: {city.Label}\n-----\n");
             }
         }
         public static async Task CreateListView(ClientContext ctx)
         {
-            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
 
             ViewCollection viewCollection = list.Views;
             ctx.Load(viewCollection);
@@ -401,10 +377,10 @@ namespace CSOMExcercises
             {
                 Title = "Test View",
                 ViewTypeKind = ViewType.Html,
-                Query = @"
+                Query = @$"
 <Where>
     <Contains>
-        <FieldRef Name='City' />
+        <FieldRef Name='{Constants.Columns.City.Name}' />
         <Value Type='Text'>Ho Chi Minh</Value>
     </Contains>
 </Where>
@@ -412,7 +388,7 @@ namespace CSOMExcercises
     <FieldRef Name='Created' Ascending='FALSE' />
 </OrderBy>
 ",
-                ViewFields = new string[] { "ID", "Title", "City", "About" }
+                ViewFields = new string[] { "ID", "Title", Constants.Columns.City.Name, Constants.Columns.About.Name }
             };
             var listView = viewCollection.Add(viewCreationInformation);
             await ctx.ExecuteQueryAsync();
@@ -420,19 +396,19 @@ namespace CSOMExcercises
         }
         public static async Task BatchUpdate(ClientContext ctx, int batchNum = 2)
         {
-            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
             var camlQuery = new CamlQuery();
-            camlQuery.ViewXml = @"
+            camlQuery.ViewXml = @$"
 <View>
 <Query>
     <Where>
         <Eq>
-            <FieldRef Name='About' />
+            <FieldRef Name='{Constants.Columns.About.Name}' />
             <Value Type='Text'>about default</Value>
         </Eq>
     </Where>
 </Query>
-<RowLimit>" + batchNum + @"</RowLimit>
+<RowLimit>{batchNum}</RowLimit>
 </View>
 ";
             ListItemCollection collListItem = list.GetItems(camlQuery);
@@ -442,7 +418,7 @@ namespace CSOMExcercises
 
             foreach (var item in collListItem)
             {
-                item["About"] = "Update script";
+                item[Constants.Columns.About.Name] = "Update script";
 
                 item.Update();
             }
@@ -450,11 +426,11 @@ namespace CSOMExcercises
         }
         public static async Task AddNewFieldAndMigrate(ClientContext ctx)
         {
-            var list = ctx.Web.Lists.GetByTitle("CSOM Test");
-            var authorField = list.Fields.AddFieldAsXml(@"
+            var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
+            var authorField = list.Fields.AddFieldAsXml(@$"
 <Field 
-    DisplayName='Author'
-    Name='TestAuthor'
+    DisplayName='{Constants.Columns.Author.DisplayName}'
+    Name='{Constants.Columns.Author.Name}'
     Type='User'
     UserSelectionMode='PeopleOnly'
 />
@@ -488,7 +464,7 @@ namespace CSOMExcercises
             foreach (var item in itemColl)
             {
                 // NOTE: The name "Author" already taken as internal field name
-                item["TestAuthor"] = fieldUserValue;
+                item[Constants.Columns.Author.Name] = fieldUserValue;
                 item.Update();
             }
             await ctx.ExecuteQueryAsync();
@@ -511,7 +487,7 @@ namespace CSOMExcercises
             /* Find information about term sets and update to taxonomy field */
             TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
             TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
-            TermSetCollection termSets = termStore.GetTermSetsByName("city-Nghiep", 1033);
+            TermSetCollection termSets = termStore.GetTermSetsByName(Constants.Taxonomy.TermSetName, 1033);
 
             ctx.Load(termSets, tsc => tsc.Include(ts => ts.Id));
             ctx.Load(termStore, ts => ts.Id);
@@ -578,36 +554,7 @@ namespace CSOMExcercises
                     }
                 )
             };
-            TaxonomySession taxonomySession = TaxonomySession.GetTaxonomySession(ctx);
-            if (taxonomySession == null)
-            {
-                throw new Exception("Cannot get taxonomy session");
-            }
-
-            TermStore termStore = taxonomySession.GetDefaultSiteCollectionTermStore();
-            ctx.Load(termStore, st => st.Groups.Include(g => g.Id, g => g.Name));
-            await ctx.ExecuteQueryAsync();
-
-            var termGroup = termStore.Groups.FirstOrDefault(group => group.Name == "CSOM Test");
-            ctx.Load(termGroup);
-            await ctx.ExecuteQueryAsync();
-            if (termGroup == null)
-            {
-                throw new Exception("Missing group");
-            }
-
-            var termSetColl = termGroup.TermSets;
-            var results = ctx.LoadQuery(termSetColl.Where(t => t.Name == "city-Nghiep"));
-            await ctx.ExecuteQueryAsync();
-
-            var termSet = results.FirstOrDefault();
-            if (termSet == null)
-            {
-                throw new Exception("Missing term set");
-            }
-            var terms = termSet.Terms;
-            ctx.Load(terms);
-            await ctx.ExecuteQueryAsync();
+            var terms = await Helpers.GetAllTerms(ctx);
 
             var list = ctx.Web.Lists.GetByTitle(Constants.List.Name);
             var tmpField = list.Fields.GetByInternalNameOrTitle(Constants.Columns.City.Name);
@@ -619,7 +566,7 @@ namespace CSOMExcercises
                 ListItemCreationInformation itemCreationInformation = new ListItemCreationInformation();
                 var spItem = list.AddItem(itemCreationInformation);
 
-                spItem["About"] = item.Item1;
+                spItem[Constants.Columns.About.Name] = item.Item1;
 
                 var cityTerm = terms.FirstOrDefault(t => t.Name == Constants.Taxonomy.GetTermName(item.Item2));
                 if (cityTerm != null)
@@ -655,7 +602,7 @@ namespace CSOMExcercises
             ListCreationInformation creationInformation = new ListCreationInformation()
             {
                 Title = Constants.Document.Name,
-                TemplateType = (int) ListTemplateType.DocumentLibrary
+                TemplateType = (int)ListTemplateType.DocumentLibrary
             };
 
             var newLib = ctx.Web.Lists.Add(creationInformation);
@@ -693,7 +640,7 @@ namespace CSOMExcercises
             {
                 var sampleFileInfo = new FileCreationInformation()
                 {
-                    Url = $"file_1{i+1}.txt",
+                    Url = $"file_1{i + 1}.txt",
                     Content = Encoding.ASCII.GetBytes("Hello, World!")
                 };
                 var addedFile = folder2.Files.Add(sampleFileInfo);
